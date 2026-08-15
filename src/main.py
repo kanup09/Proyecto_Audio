@@ -1,15 +1,12 @@
-from audio.sessions import obtener_sesion_por_proceso
-from audio.volume import obtener_volumen, cambiar_volumen
+from audio.routing import listar_dispositivos_salida, enrutar_app
 
 if __name__ == "__main__":
-    sesion = obtener_sesion_por_proceso("Spotify.exe")
+    dispositivos = listar_dispositivos_salida()
+    print("Dispositivos de salida disponibles:")
+    for i, d in enumerate(dispositivos):
+        print(f"  [{i}] {d['nombre_amigable']}")
 
-    if sesion:
-        actual = obtener_volumen(sesion)
-        print(f"Volumen actual: {actual:.2f}")
-
-        nuevo = max(0.0, actual + 0.1)  # baja 10 puntos, sin ir debajo de 0
-        cambiar_volumen(sesion, nuevo)
-        print(f"Volumen nuevo: {nuevo:.2f}")
-    else:
-        print("No se encontró la sesión de Spotify")
+    # Ejemplo: mandar Spotify al dispositivo número 0 de la lista
+    if dispositivos:
+        exito = enrutar_app("Spotify.exe", dispositivos[0]["nombre_completo"])
+        print("Ruteo aplicado" if exito else "Falló el ruteo")
