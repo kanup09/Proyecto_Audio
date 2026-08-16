@@ -2,9 +2,11 @@ import subprocess
 import csv
 import os
 import tempfile
+from paths import ruta_base
 
 # Ruta al ejecutable de svcl.exe dentro del proyecto
-SVCL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "tools", "svcl.exe")
+
+SVCL_PATH = os.path.join(ruta_base(), "tools", "svcl.exe")
 
 
 def listar_dispositivos_salida():
@@ -25,8 +27,10 @@ def listar_dispositivos_salida():
                 and fila.get("Device State") == "Active"
             )
             if es_dispositivo_fisico and es_salida_activa:
+                nombre = fila.get("Name", "").strip()
+                hardware = fila.get("Device Name", "").strip()
                 dispositivos.append({
-                    "nombre_amigable": fila.get("Name", "").strip(),
+                    "nombre_amigable": f"{nombre} ({hardware})" if hardware else nombre,
                     "nombre_completo": fila.get("Command-Line Friendly ID", "").strip(),
                 })
 
