@@ -15,6 +15,15 @@ def guardar_regla(proceso, dispositivo_nombre_completo, dispositivo_nombre_amiga
     conexion.close()
 
 
+def eliminar_regla(proceso):
+    """Borra la regla guardada de un proceso, si existe. A partir de acá
+    nuestra app deja de tocarlo por completo en los refrescos automáticos."""
+    conexion = obtener_conexion()
+    conexion.execute("DELETE FROM reglas WHERE proceso = ?", (proceso,))
+    conexion.commit()
+    conexion.close()
+
+
 def obtener_regla(proceso):
     """Devuelve el dispositivo guardado para un proceso, o None si no hay regla."""
     conexion = obtener_conexion()

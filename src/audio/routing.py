@@ -11,6 +11,12 @@ SVCL_PATH = os.path.join(ruta_base(), "tools", "svcl.exe")
 # lanzamos svcl.exe desde una app sin consola propia (--windowed).
 FLAGS_SIN_CONSOLA = subprocess.CREATE_NO_WINDOW
 
+# Valor especial que guardamos en la base de datos para las reglas que
+# dicen "seguí al dispositivo predeterminado de Windows" en vez de un
+# dispositivo fijo. No es un ID real de dispositivo.
+DISPOSITIVO_PREDETERMINADO = "PREDETERMINADO"
+NOMBRE_PREDETERMINADO = "Predeterminado (seguir a Windows)"
+
 
 def obtener_filas_svcl():
     """Ejecuta svcl.exe UNA sola vez y devuelve todas las filas del CSV
@@ -54,6 +60,21 @@ def listar_dispositivos_salida(filas=None):
                 "nombre_completo": fila.get("Command-Line Friendly ID", "").strip(),
             })
     return dispositivos
+
+
+def obtener_dispositivo_predeterminado_actual(filas=None):
+    """Busca cuál dispositivo de salida es HOY el predeterminado del
+    sistema (columna 'Default' del CSV de svcl.exe) y devuelve su ID."""
+    if filas is None:
+        filas = obtener_filas_svcl()
+
+    for fila in filas:
+        es_dispositivo_fisico = fila.get("Type") == "Device"
+        es_salida = fila.get("Direction") == "Render"
+        es_default = fila.get("Default") == "Render"
+        if es_dispositivo_fisico and es_salida and es_default:
+            return fila.get("Command-Line Friendly ID", "").strip()
+    return None
 
 
 def enrutar_app(nombre_proceso, nombre_dispositivo):

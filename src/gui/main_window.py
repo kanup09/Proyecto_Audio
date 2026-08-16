@@ -5,21 +5,31 @@ import sys
 from paths import ruta_base
 
 from audio.sessions import listar_sesiones
-from audio.routing import listar_dispositivos_salida, enrutar_app, obtener_filas_svcl
+from audio.routing import (
+    listar_dispositivos_salida, enrutar_app, obtener_filas_svcl,
+    obtener_dispositivo_predeterminado_actual,
+    DISPOSITIVO_PREDETERMINADO, NOMBRE_PREDETERMINADO,
+)
 from audio.volume import obtener_volumen, cambiar_volumen
 from audio.app_info import obtener_nombres_amigables, nombre_para_mostrar
-from storage.rules import guardar_regla, obtener_regla
+from storage.rules import guardar_regla, obtener_regla, eliminar_regla
+from gui.bandeja import ocultar_a_bandeja
 
 INTERVALO_MONITOREO_MS = 3000  # cada cuánto revisar si hay apps nuevas
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+SIN_ASIGNAR = "SIN_ASIGNAR"
+NOMBRE_SIN_ASIGNAR = "Sin asignar (dejar que Windows controle)"
+
+
 def get_path(relative_path):
-  base_path = getattr(
-      sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__))
-  )
-  return os.path.join(base_path, relative_path)
+    base_path = getattr(
+        sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__))
+    )
+    return os.path.join(base_path, relative_path)
+
 
 class VentanaPrincipal(ctk.CTk):
     def __init__(self):
@@ -34,7 +44,12 @@ class VentanaPrincipal(ctk.CTk):
         except Exception:
             pass
 
+        # Al apretar la X, en vez de cerrar la app, se minimiza a la
+        # bandeja del sistema (queda corriendo en segundo plano).
+        self.protocol("WM_DELETE_WINDOW", lambda: ocultar_a_bandeja(self))
+
         self.dispositivos = []
+        self.opciones = {}   # nombre_amigable (o "Predeterminado...") -> nombre_completo real o sentinel
         self.filas = {}
         self.procesos_conocidos = set()
 
@@ -72,13 +87,17 @@ class VentanaPrincipal(ctk.CTk):
             widget.destroy()
         self.filas.clear()
 
-        # Una sola llamada a svcl.exe por refresco: antes pedíamos el CSV
-        # dos veces (dispositivos y nombres amigables por separado), lo
-        # que duplicaba el corte/freeze de la interfaz en cada refresco.
         filas_svcl = obtener_filas_svcl()
         self.dispositivos = listar_dispositivos_salida(filas_svcl)
-        nombres_dispositivos = [d["nombre_amigable"] for d in self.dispositivos]
         nombres_amigables = obtener_nombres_amigables(filas_svcl)
+
+        self.opciones = {
+            NOMBRE_SIN_ASIGNAR: SIN_ASIGNAR,
+            NOMBRE_PREDETERMINADO: DISPOSITIVO_PREDETERMINADO,
+        }
+        for d in self.dispositivos:
+            self.opciones[d["nombre_amigable"]] = d["nombre_completo"]
+        nombres_para_combo = list(self.opciones.keys())
 
         procesos_vistos = set()
         for sesion in listar_sesiones():
@@ -96,14 +115,16 @@ class VentanaPrincipal(ctk.CTk):
 
             ctk.CTkLabel(fila, text=texto_mostrado, width=150, anchor="w").pack(side="left", padx=(12, 6), pady=10)
 
-            combo = ctk.CTkComboBox(fila, values=nombres_dispositivos, width=210, state="readonly")
+            combo = ctk.CTkComboBox(fila, values=nombres_para_combo, width=220, state="readonly")
             combo.pack(side="left", padx=6, pady=10)
 
             regla = obtener_regla(nombre_proceso)
-            if regla and regla["nombre_amigable"] in nombres_dispositivos:
+            if regla and regla["nombre_completo"] == DISPOSITIVO_PREDETERMINADO:
+                combo.set(NOMBRE_PREDETERMINADO)
+            elif regla and regla["nombre_amigable"] in self.opciones:
                 combo.set(regla["nombre_amigable"])
             else:
-                combo.set("Elegir dispositivo...")
+                combo.set(NOMBRE_SIN_ASIGNAR)
 
             combo.configure(
                 command=lambda valor, proceso=nombre_proceso, c=combo: self._on_seleccion(proceso, c)
@@ -116,7 +137,7 @@ class VentanaPrincipal(ctk.CTk):
 
             label_volumen = ctk.CTkLabel(fila, text=f"{volumen_actual}%", width=36)
 
-            slider = ctk.CTkSlider(fila, from_=0, to=100, width=130)
+            slider = ctk.CTkSlider(fila, from_=0, to=100, width=120)
             slider.set(volumen_actual)
             slider.configure(
                 command=lambda valor, s=sesion, lbl=label_volumen: self._on_cambio_volumen(valor, s, lbl)
@@ -130,14 +151,31 @@ class VentanaPrincipal(ctk.CTk):
 
     def _on_seleccion(self, nombre_proceso, combo):
         seleccionado = combo.get()
-        if seleccionado not in [d["nombre_amigable"] for d in self.dispositivos]:
+        if seleccionado not in self.opciones:
             return
-        dispositivo = next(d for d in self.dispositivos if d["nombre_amigable"] == seleccionado)
-        if enrutar_app(nombre_proceso, dispositivo["nombre_completo"]):
-            guardar_regla(nombre_proceso, dispositivo["nombre_completo"], dispositivo["nombre_amigable"])
-            print(f"{nombre_proceso} -> {dispositivo['nombre_amigable']} (guardado)")
+
+        elegido = self.opciones[seleccionado]
+
+        if elegido == SIN_ASIGNAR:
+            eliminar_regla(nombre_proceso)
+            print(f"{nombre_proceso}: regla eliminada, ahora la controla Windows")
+            return
+
+        if elegido == DISPOSITIVO_PREDETERMINADO:
+            destino_real = obtener_dispositivo_predeterminado_actual()
+            if not destino_real:
+                print("No se pudo detectar el dispositivo predeterminado actual")
+                return
+            if enrutar_app(nombre_proceso, destino_real):
+                guardar_regla(nombre_proceso, DISPOSITIVO_PREDETERMINADO, NOMBRE_PREDETERMINADO)
+                print(f"{nombre_proceso} -> {NOMBRE_PREDETERMINADO} (guardado)")
         else:
-            print(f"Error enrutando {nombre_proceso}")
+            dispositivo = next(d for d in self.dispositivos if d["nombre_amigable"] == seleccionado)
+            if enrutar_app(nombre_proceso, dispositivo["nombre_completo"]):
+                guardar_regla(nombre_proceso, dispositivo["nombre_completo"], dispositivo["nombre_amigable"])
+                print(f"{nombre_proceso} -> {dispositivo['nombre_amigable']} (guardado)")
+            else:
+                print(f"Error enrutando {nombre_proceso}")
 
     def _on_cambio_volumen(self, valor, sesion, label_volumen):
         nivel = float(valor) / 100
@@ -156,7 +194,10 @@ class VentanaPrincipal(ctk.CTk):
             for proceso in nuevos:
                 regla = obtener_regla(proceso)
                 if regla:
-                    if enrutar_app(proceso, regla["nombre_completo"]):
+                    destino = regla["nombre_completo"]
+                    if destino == DISPOSITIVO_PREDETERMINADO:
+                        destino = obtener_dispositivo_predeterminado_actual()
+                    if destino and enrutar_app(proceso, destino):
                         print(f"[auto] {proceso} -> {regla['nombre_amigable']}")
             self.actualizar()
         elif procesos_actuales != self.procesos_conocidos:
