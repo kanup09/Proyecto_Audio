@@ -1,30 +1,23 @@
-import subprocess
-import csv
-import tempfile
 import os
 
-from audio.routing import SVCL_PATH
+from audio.routing import obtener_filas_svcl
 
 
-def obtener_nombres_amigables():
-    """Devuelve un diccionario {nombre_proceso_en_minuscula: nombre_amigable},
-    usando la info de aplicaciones que ya expone svcl.exe (ej: 'spotify.exe' -> 'Spotify')."""
-    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-        ruta_csv = tmp.name
-
-    subprocess.run([SVCL_PATH, "/scomma", ruta_csv], check=True)
+def obtener_nombres_amigables(filas=None):
+    """Devuelve un diccionario {nombre_proceso_en_minuscula: nombre_amigable}.
+    Si no le pasás 'filas', las pide él mismo (llamando a svcl.exe);
+    pero para no duplicar la llamada, main_window.py le pasa las filas
+    que ya pidió para la lista de dispositivos."""
+    if filas is None:
+        filas = obtener_filas_svcl()
 
     nombres = {}
-    with open(ruta_csv, encoding="utf-8-sig") as f:
-        lector = csv.DictReader(f)
-        for fila in lector:
-            if fila.get("Type") == "Application":
-                ruta_proceso = fila.get("Process Path", "")
-                if ruta_proceso:
-                    nombre_proceso = os.path.basename(ruta_proceso).lower()
-                    nombres[nombre_proceso] = fila.get("Name", "").strip()
-
-    os.remove(ruta_csv)
+    for fila in filas:
+        if fila.get("Type") == "Application":
+            ruta_proceso = fila.get("Process Path", "")
+            if ruta_proceso:
+                nombre_proceso = os.path.basename(ruta_proceso).lower()
+                nombres[nombre_proceso] = fila.get("Name", "").strip()
     return nombres
 
 

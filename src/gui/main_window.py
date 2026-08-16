@@ -1,15 +1,15 @@
 import customtkinter as ctk
 
 from audio.sessions import listar_sesiones
-from audio.routing import listar_dispositivos_salida, enrutar_app
+from audio.routing import listar_dispositivos_salida, enrutar_app, obtener_filas_svcl
 from audio.volume import obtener_volumen, cambiar_volumen
 from audio.app_info import obtener_nombres_amigables, nombre_para_mostrar
 from storage.rules import guardar_regla, obtener_regla
 
 INTERVALO_MONITOREO_MS = 3000  # cada cuánto revisar si hay apps nuevas
 
-ctk.set_appearance_mode("dark")          # "dark", "light" o "system"
-ctk.set_default_color_theme("blue")      # color de acento para botones/sliders
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
 
 class VentanaPrincipal(ctk.CTk):
@@ -28,7 +28,6 @@ class VentanaPrincipal(ctk.CTk):
         self._verificar_sesiones_nuevas()
 
     def _construir_interfaz(self):
-        # --- Barra superior ---
         barra_superior = ctk.CTkFrame(self, fg_color="transparent")
         barra_superior.pack(fill="x", padx=16, pady=(16, 8))
 
@@ -42,7 +41,6 @@ class VentanaPrincipal(ctk.CTk):
             command=self.actualizar
         ).pack(side="right")
 
-        # --- Encabezado de columnas ---
         encabezado = ctk.CTkFrame(self, fg_color="transparent")
         encabezado.pack(fill="x", padx=24)
         fuente_encabezado = ctk.CTkFont(size=12, weight="bold")
@@ -51,9 +49,6 @@ class VentanaPrincipal(ctk.CTk):
         ctk.CTkLabel(encabezado, text="DISPOSITIVO", font=fuente_encabezado, width=220, anchor="w").pack(side="left")
         ctk.CTkLabel(encabezado, text="VOLUMEN", font=fuente_encabezado, anchor="w").pack(side="left", padx=(10, 0))
 
-        # --- Lista scrolleable de apps ---
-        # CTkScrollableFrame ya trae el scroll resuelto, sin el lío de
-        # Canvas + Scrollbar que armábamos a mano en la versión anterior.
         self.contenedor = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.contenedor.pack(fill="both", expand=True, padx=16, pady=(6, 16))
 
@@ -62,9 +57,13 @@ class VentanaPrincipal(ctk.CTk):
             widget.destroy()
         self.filas.clear()
 
-        self.dispositivos = listar_dispositivos_salida()
+        # Una sola llamada a svcl.exe por refresco: antes pedíamos el CSV
+        # dos veces (dispositivos y nombres amigables por separado), lo
+        # que duplicaba el corte/freeze de la interfaz en cada refresco.
+        filas_svcl = obtener_filas_svcl()
+        self.dispositivos = listar_dispositivos_salida(filas_svcl)
         nombres_dispositivos = [d["nombre_amigable"] for d in self.dispositivos]
-        nombres_amigables = obtener_nombres_amigables()
+        nombres_amigables = obtener_nombres_amigables(filas_svcl)
 
         procesos_vistos = set()
         for sesion in listar_sesiones():
@@ -77,9 +76,6 @@ class VentanaPrincipal(ctk.CTk):
 
             texto_mostrado = nombre_para_mostrar(nombre_proceso, nombres_amigables)
 
-            # Cada fila es una "tarjeta" con esquinas redondeadas propia,
-            # en vez de una línea plana — esto es lo que más ayuda a que
-            # se sienta moderna, más que cualquier color puntual.
             fila = ctk.CTkFrame(self.contenedor, corner_radius=10)
             fila.pack(fill="x", pady=5, padx=2)
 
