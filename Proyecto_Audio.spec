@@ -1,7 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('tools/svcl.exe', 'tools')]
+datas = [
+    ('tools/svcl.exe', 'tools'),
+    ('assets/icon.ico', 'assets')
+]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('customtkinter')
@@ -30,6 +33,7 @@ exe = EXE(
     a.datas,
     [],
     name='Proyecto_Audio',
+    icon='assets/icon.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -42,4 +46,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    
 )

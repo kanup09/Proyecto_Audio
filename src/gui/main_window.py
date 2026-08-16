@@ -1,4 +1,7 @@
 import customtkinter as ctk
+import os
+
+from paths import ruta_base
 
 from audio.sessions import listar_sesiones
 from audio.routing import listar_dispositivos_salida, enrutar_app, obtener_filas_svcl
@@ -15,6 +18,13 @@ ctk.set_default_color_theme("blue")
 class VentanaPrincipal(ctk.CTk):
     def __init__(self):
         super().__init__()
+        ruta_icono = os.path.join(
+            ruta_base(),
+            "assets",
+            "icon.ico"
+        )
+
+        self.iconbitmap(ruta_icono)
         self.title("Proyecto_Audio")
         self.geometry("680x460")
         self.minsize(560, 320)
