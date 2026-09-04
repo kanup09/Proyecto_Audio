@@ -1,0 +1,30 @@
+# Entornos virtuales: se recrean instalando requirements.txt.
+.venv/
+venv/
+env/
+
+# Archivos generados por Python.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Resultados de PyInstaller: no son código fuente.
+build/
+dist/
+
+# Datos locales creados mientras se usa la aplicación.
+reglas.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Configuración de editores y sistema operativo.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Archivos temporales y registros.
+*.log
+*.tmp
+*.bak
