@@ -1,6 +1,9 @@
 import customtkinter as ctk
+import comtypes
 import ctypes
 import os
+import queue
+import threading
 from psutil import Error as PsutilError
 
 from paths import ruta_base
@@ -55,6 +58,7 @@ class VentanaPrincipal(ctk.CTk):
         self.opciones = {}   # nombre_amigable (o "Predeterminado...") -> nombre_completo real o sentinel
         self.filas = {}
         self.procesos_conocidos = set()
+        self.resultados_monitoreo = queue.Queue()
 
         self._construir_interfaz()
         self.actualizar()
@@ -282,7 +286,31 @@ class VentanaPrincipal(ctk.CTk):
         label_volumen.configure(text=f"{int(float(valor))}%")
 
     def _verificar_sesiones_nuevas(self):
+        """Inicia una consulta de sesiones sin bloquear la interfaz."""
+        procesos_anteriores = set(self.procesos_conocidos)
+        hilo = threading.Thread(
+            target=self._consultar_sesiones_en_segundo_plano,
+            args=(procesos_anteriores,),
+            daemon=True,
+        )
+        hilo.start()
+        self.after(100, self._recoger_resultado_monitoreo)
+
+    def _consultar_sesiones_en_segundo_plano(self, procesos_anteriores):
+        """Consulta Windows desde un hilo y entrega datos, nunca widgets."""
+        resultado = {
+            "procesos": procesos_anteriores,
+            "mensajes": [],
+            "error": None,
+        }
+        com_inicializado = False
+
         try:
+            # Cada hilo que utiliza las interfaces COM de Windows debe
+            # inicializarlas y liberarlas de manera independiente.
+            comtypes.CoInitialize()
+            com_inicializado = True
+
             procesos_actuales = set()
             for sesion in listar_sesiones():
                 if not sesion.Process:
@@ -292,29 +320,61 @@ class VentanaPrincipal(ctk.CTk):
                 except (OSError, PsutilError):
                     continue
 
-            nuevos = procesos_actuales - self.procesos_conocidos
+            resultado["procesos"] = procesos_actuales
+            nuevos = procesos_actuales - procesos_anteriores
 
-            if nuevos:
-                for proceso in nuevos:
-                    regla = obtener_regla(proceso)
-                    if regla:
-                        destino = regla["nombre_completo"]
-                        if destino == DISPOSITIVO_PREDETERMINADO:
-                            destino = obtener_dispositivo_predeterminado_actual()
-                        if destino and enrutar_app(proceso, destino):
-                            mensaje = f"Regla automática aplicada: {proceso} → {regla['nombre_amigable']}"
-                            self._mostrar_estado(mensaje)
-                            print(f"[auto] {mensaje}")
-                self.actualizar()
-            elif procesos_actuales != self.procesos_conocidos:
-                self.actualizar()
+            for proceso in nuevos:
+                regla = obtener_regla(proceso)
+                if not regla:
+                    continue
+
+                destino = regla["nombre_completo"]
+                if destino == DISPOSITIVO_PREDETERMINADO:
+                    destino = obtener_dispositivo_predeterminado_actual()
+
+                if destino and enrutar_app(proceso, destino):
+                    mensaje = (
+                        f"Regla automática aplicada: {proceso} → "
+                        f"{regla['nombre_amigable']}"
+                    )
+                    resultado["mensajes"].append((mensaje, False))
+                    print(f"[auto] {mensaje}")
+                else:
+                    resultado["mensajes"].append(
+                        (f"No se pudo aplicar la regla de {proceso}", True)
+                    )
         except Exception as error:
-            mensaje = f"No se pudo comprobar el audio: {error}"
+            resultado["error"] = str(error)
+        finally:
+            if com_inicializado:
+                comtypes.CoUninitialize()
+            self.resultados_monitoreo.put(resultado)
+
+    def _recoger_resultado_monitoreo(self):
+        """Procesa en el hilo principal los datos obtenidos en segundo plano."""
+        try:
+            resultado = self.resultados_monitoreo.get_nowait()
+        except queue.Empty:
+            self.after(100, self._recoger_resultado_monitoreo)
+            return
+
+        if resultado["error"]:
+            mensaje = f"No se pudo comprobar el audio: {resultado['error']}"
             self._mostrar_estado(mensaje, es_error=True)
             print(mensaje)
-        finally:
-            # Un fallo aislado no debe detener las comprobaciones futuras.
-            self.after(INTERVALO_MONITOREO_MS, self._verificar_sesiones_nuevas)
+        else:
+            for mensaje, es_error in resultado["mensajes"]:
+                self._mostrar_estado(mensaje, es_error=es_error)
+
+            procesos_actuales = resultado["procesos"]
+            if procesos_actuales != self.procesos_conocidos:
+                # Se actualiza antes de redibujar para no volver a aplicar una
+                # regla si la actualización visual falla de manera aislada.
+                self.procesos_conocidos = procesos_actuales
+                self.actualizar()
+
+        # Un fallo aislado no debe detener las comprobaciones futuras.
+        self.after(INTERVALO_MONITOREO_MS, self._verificar_sesiones_nuevas)
 
 
 def iniciar():
