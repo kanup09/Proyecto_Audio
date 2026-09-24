@@ -1,6 +1,6 @@
 import customtkinter as ctk
+import ctypes
 import os
-import sys
 
 from paths import ruta_base
 
@@ -20,22 +20,23 @@ INTERVALO_MONITOREO_MS = 3000  # cada cuánto revisar si hay apps nuevas
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-def get_path(relative_path):
-    base_path = getattr(
-        sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__))
-    )
-    return os.path.join(base_path, relative_path)
+
+def _configurar_identidad_windows():
+    """Evita que la barra de tareas agrupe la ventana como una app de Python."""
+    app_id = "ProyectoAudio.Aplicacion"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
 
 
 class VentanaPrincipal(ctk.CTk):
     def __init__(self):
+        _configurar_identidad_windows()
         super().__init__()
         self.title("Proyecto_Audio")
         self.geometry("680x460")
         self.minsize(560, 320)
 
         try:
-            icon_path = get_path('assets/icon.ico')
+            icon_path = os.path.join(ruta_base(), "assets", "icon.ico")
             self.iconbitmap(icon_path)
         except Exception:
             pass
