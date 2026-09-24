@@ -9,6 +9,7 @@ from psutil import Error as PsutilError
 from paths import ruta_base
 
 from audio.sessions import listar_sesiones
+from audio.device_events import registrar_notificador_dispositivo
 from audio.routing import (
     listar_dispositivos_salida, enrutar_app, obtener_filas_svcl,
     obtener_dispositivo_predeterminado_actual,
@@ -16,7 +17,7 @@ from audio.routing import (
 )
 from audio.volume import obtener_volumen, cambiar_volumen
 from audio.app_info import obtener_nombres_amigables, nombre_para_mostrar
-from storage.rules import guardar_regla, obtener_regla
+from storage.rules import guardar_regla, obtener_regla, obtener_todas_las_reglas
 from storage.preferences import (
     ACCION_CIERRE_BANDEJA,
     ACCION_CIERRE_SALIR,
@@ -58,11 +59,19 @@ class VentanaPrincipal(ctk.CTk):
         self.opciones = {}   # nombre_amigable (o "Predeterminado...") -> nombre_completo real o sentinel
         self.filas = {}
         self.procesos_conocidos = set()
+        self.dispositivo_predeterminado_conocido = None
         self.resultados_monitoreo = queue.Queue()
+        self.evento_cambio_predeterminado = threading.Event()
+        self.monitoreo_en_curso = False
+        self.id_proximo_monitoreo = None
+        self.enumerador_notificaciones = None
+        self.notificador_dispositivo = None
 
         self._construir_interfaz()
         self.actualizar()
-        self._verificar_sesiones_nuevas()
+        self._iniciar_notificaciones_dispositivo()
+        self._programar_monitoreo(0)
+        self.after(100, self._comprobar_evento_dispositivo)
 
     def _construir_interfaz(self):
         barra_superior = ctk.CTkFrame(self, fg_color="transparent")
@@ -285,21 +294,65 @@ class VentanaPrincipal(ctk.CTk):
         cambiar_volumen(sesion, nivel)
         label_volumen.configure(text=f"{int(float(valor))}%")
 
+    def _iniciar_notificaciones_dispositivo(self):
+        """Escucha los cambios de salida predeterminada informados por Windows."""
+        try:
+            referencias = registrar_notificador_dispositivo(
+                self.evento_cambio_predeterminado
+            )
+            self.enumerador_notificaciones, self.notificador_dispositivo = referencias
+        except Exception as error:
+            # El monitoreo periódico continúa funcionando como respaldo.
+            mensaje = f"No se pudo activar la detección inmediata: {error}"
+            self._mostrar_estado(mensaje, es_error=True)
+            print(mensaje)
+
+    def _comprobar_evento_dispositivo(self):
+        """Inicia una consulta inmediata cuando Windows informa un cambio."""
+        if (
+            self.evento_cambio_predeterminado.is_set()
+            and not self.monitoreo_en_curso
+        ):
+            self.evento_cambio_predeterminado.clear()
+            self._programar_monitoreo(0)
+
+        self.after(100, self._comprobar_evento_dispositivo)
+
+    def _programar_monitoreo(self, demora_ms):
+        """Programa una única comprobación y reemplaza la espera anterior."""
+        if self.id_proximo_monitoreo is not None:
+            self.after_cancel(self.id_proximo_monitoreo)
+        self.id_proximo_monitoreo = self.after(
+            demora_ms,
+            self._verificar_sesiones_nuevas,
+        )
+
     def _verificar_sesiones_nuevas(self):
         """Inicia una consulta de sesiones sin bloquear la interfaz."""
+        self.id_proximo_monitoreo = None
+        if self.monitoreo_en_curso:
+            return
+        self.monitoreo_en_curso = True
+
         procesos_anteriores = set(self.procesos_conocidos)
+        predeterminado_anterior = self.dispositivo_predeterminado_conocido
         hilo = threading.Thread(
             target=self._consultar_sesiones_en_segundo_plano,
-            args=(procesos_anteriores,),
+            args=(procesos_anteriores, predeterminado_anterior),
             daemon=True,
         )
         hilo.start()
         self.after(100, self._recoger_resultado_monitoreo)
 
-    def _consultar_sesiones_en_segundo_plano(self, procesos_anteriores):
+    def _consultar_sesiones_en_segundo_plano(
+        self,
+        procesos_anteriores,
+        predeterminado_anterior,
+    ):
         """Consulta Windows desde un hilo y entrega datos, nunca widgets."""
         resultado = {
             "procesos": procesos_anteriores,
+            "dispositivo_predeterminado": predeterminado_anterior,
             "mensajes": [],
             "error": None,
         }
@@ -322,21 +375,44 @@ class VentanaPrincipal(ctk.CTk):
 
             resultado["procesos"] = procesos_actuales
             nuevos = procesos_actuales - procesos_anteriores
+            predeterminado_actual = obtener_dispositivo_predeterminado_actual()
+            resultado["dispositivo_predeterminado"] = predeterminado_actual
+            cambio_predeterminado = (
+                predeterminado_actual is not None
+                and predeterminado_actual != predeterminado_anterior
+            )
 
-            for proceso in nuevos:
-                regla = obtener_regla(proceso)
+            reglas = obtener_todas_las_reglas()
+            procesos_a_enrutar = set(nuevos)
+            if cambio_predeterminado:
+                procesos_a_enrutar.update(
+                    proceso
+                    for proceso in procesos_actuales
+                    if proceso in reglas
+                    and reglas[proceso]["nombre_completo"]
+                    == DISPOSITIVO_PREDETERMINADO
+                )
+
+            for proceso in procesos_a_enrutar:
+                regla = reglas.get(proceso)
                 if not regla:
                     continue
 
                 destino = regla["nombre_completo"]
                 if destino == DISPOSITIVO_PREDETERMINADO:
-                    destino = obtener_dispositivo_predeterminado_actual()
+                    destino = predeterminado_actual
 
                 if destino and enrutar_app(proceso, destino):
-                    mensaje = (
-                        f"Regla automática aplicada: {proceso} → "
-                        f"{regla['nombre_amigable']}"
-                    )
+                    if cambio_predeterminado and proceso not in nuevos:
+                        mensaje = (
+                            f"{proceso} ahora sigue el nuevo dispositivo "
+                            "predeterminado"
+                        )
+                    else:
+                        mensaje = (
+                            f"Regla automática aplicada: {proceso} → "
+                            f"{regla['nombre_amigable']}"
+                        )
                     resultado["mensajes"].append((mensaje, False))
                     print(f"[auto] {mensaje}")
                 else:
@@ -358,11 +434,17 @@ class VentanaPrincipal(ctk.CTk):
             self.after(100, self._recoger_resultado_monitoreo)
             return
 
+        self.monitoreo_en_curso = False
+
         if resultado["error"]:
             mensaje = f"No se pudo comprobar el audio: {resultado['error']}"
             self._mostrar_estado(mensaje, es_error=True)
             print(mensaje)
         else:
+            self.dispositivo_predeterminado_conocido = resultado[
+                "dispositivo_predeterminado"
+            ]
+
             for mensaje, es_error in resultado["mensajes"]:
                 self._mostrar_estado(mensaje, es_error=es_error)
 
@@ -374,7 +456,7 @@ class VentanaPrincipal(ctk.CTk):
                 self.actualizar()
 
         # Un fallo aislado no debe detener las comprobaciones futuras.
-        self.after(INTERVALO_MONITOREO_MS, self._verificar_sesiones_nuevas)
+        self._programar_monitoreo(INTERVALO_MONITOREO_MS)
 
 
 def iniciar():
