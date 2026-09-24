@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import ctypes
 import os
+from psutil import Error as PsutilError
 
 from paths import ruta_base
 
@@ -154,13 +155,27 @@ class VentanaPrincipal(ctk.CTk):
         ).pack(pady=(18, 0))
 
     def actualizar(self):
+        try:
+            filas_svcl = obtener_filas_svcl()
+            dispositivos = listar_dispositivos_salida(filas_svcl)
+            nombres_amigables = obtener_nombres_amigables(filas_svcl)
+            sesiones = listar_sesiones()
+        except FileNotFoundError:
+            mensaje = "No se encontró svcl.exe en la carpeta tools"
+            self._mostrar_estado(mensaje, es_error=True)
+            print(mensaje)
+            return
+        except Exception as error:
+            mensaje = f"No se pudo actualizar el audio: {error}"
+            self._mostrar_estado(mensaje, es_error=True)
+            print(mensaje)
+            return
+
         for widget in self.contenedor.winfo_children():
             widget.destroy()
         self.filas.clear()
 
-        filas_svcl = obtener_filas_svcl()
-        self.dispositivos = listar_dispositivos_salida(filas_svcl)
-        nombres_amigables = obtener_nombres_amigables(filas_svcl)
+        self.dispositivos = dispositivos
 
         self.opciones = {
             NOMBRE_PREDETERMINADO: DISPOSITIVO_PREDETERMINADO,
@@ -170,10 +185,14 @@ class VentanaPrincipal(ctk.CTk):
         nombres_para_combo = list(self.opciones.keys())
 
         procesos_vistos = set()
-        for sesion in listar_sesiones():
+        for sesion in sesiones:
             if not sesion.Process:
                 continue
-            nombre_proceso = sesion.Process.name()
+            try:
+                nombre_proceso = sesion.Process.name()
+            except (OSError, PsutilError):
+                # El proceso puede cerrarse entre la detección y esta consulta.
+                continue
             if nombre_proceso in procesos_vistos:
                 continue
             procesos_vistos.add(nombre_proceso)
@@ -263,29 +282,39 @@ class VentanaPrincipal(ctk.CTk):
         label_volumen.configure(text=f"{int(float(valor))}%")
 
     def _verificar_sesiones_nuevas(self):
-        procesos_actuales = set()
-        for sesion in listar_sesiones():
-            if sesion.Process:
-                procesos_actuales.add(sesion.Process.name())
+        try:
+            procesos_actuales = set()
+            for sesion in listar_sesiones():
+                if not sesion.Process:
+                    continue
+                try:
+                    procesos_actuales.add(sesion.Process.name())
+                except (OSError, PsutilError):
+                    continue
 
-        nuevos = procesos_actuales - self.procesos_conocidos
+            nuevos = procesos_actuales - self.procesos_conocidos
 
-        if nuevos:
-            for proceso in nuevos:
-                regla = obtener_regla(proceso)
-                if regla:
-                    destino = regla["nombre_completo"]
-                    if destino == DISPOSITIVO_PREDETERMINADO:
-                        destino = obtener_dispositivo_predeterminado_actual()
-                    if destino and enrutar_app(proceso, destino):
-                        mensaje = f"Regla automática aplicada: {proceso} → {regla['nombre_amigable']}"
-                        self._mostrar_estado(mensaje)
-                        print(f"[auto] {mensaje}")
-            self.actualizar()
-        elif procesos_actuales != self.procesos_conocidos:
-            self.actualizar()
-
-        self.after(INTERVALO_MONITOREO_MS, self._verificar_sesiones_nuevas)
+            if nuevos:
+                for proceso in nuevos:
+                    regla = obtener_regla(proceso)
+                    if regla:
+                        destino = regla["nombre_completo"]
+                        if destino == DISPOSITIVO_PREDETERMINADO:
+                            destino = obtener_dispositivo_predeterminado_actual()
+                        if destino and enrutar_app(proceso, destino):
+                            mensaje = f"Regla automática aplicada: {proceso} → {regla['nombre_amigable']}"
+                            self._mostrar_estado(mensaje)
+                            print(f"[auto] {mensaje}")
+                self.actualizar()
+            elif procesos_actuales != self.procesos_conocidos:
+                self.actualizar()
+        except Exception as error:
+            mensaje = f"No se pudo comprobar el audio: {error}"
+            self._mostrar_estado(mensaje, es_error=True)
+            print(mensaje)
+        finally:
+            # Un fallo aislado no debe detener las comprobaciones futuras.
+            self.after(INTERVALO_MONITOREO_MS, self._verificar_sesiones_nuevas)
 
 
 def iniciar():

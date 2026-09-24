@@ -26,17 +26,21 @@ def obtener_filas_svcl():
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
         ruta_csv = tmp.name
 
-    subprocess.run(
-        [SVCL_PATH, "/scomma", ruta_csv],
-        check=True,
-        creationflags=FLAGS_SIN_CONSOLA,
-    )
+    try:
+        subprocess.run(
+            [SVCL_PATH, "/scomma", ruta_csv],
+            check=True,
+            creationflags=FLAGS_SIN_CONSOLA,
+        )
 
-    with open(ruta_csv, encoding="utf-8-sig") as f:
-        filas = list(csv.DictReader(f))
-
-    os.remove(ruta_csv)
-    return filas
+        with open(ruta_csv, encoding="utf-8-sig") as f:
+            return list(csv.DictReader(f))
+    finally:
+        # El archivo también debe eliminarse si svcl.exe o la lectura fallan.
+        try:
+            os.remove(ruta_csv)
+        except FileNotFoundError:
+            pass
 
 
 def listar_dispositivos_salida(filas=None):
@@ -79,11 +83,16 @@ def obtener_dispositivo_predeterminado_actual(filas=None):
 
 def enrutar_app(nombre_proceso, nombre_dispositivo):
     """Manda el audio de un proceso a un dispositivo de salida específico."""
-    resultado = subprocess.run(
-        [SVCL_PATH, "/SetAppDefault", nombre_dispositivo, "all", nombre_proceso],
-        capture_output=True, text=True,
-        creationflags=FLAGS_SIN_CONSOLA,
-    )
+    try:
+        resultado = subprocess.run(
+            [SVCL_PATH, "/SetAppDefault", nombre_dispositivo, "all", nombre_proceso],
+            capture_output=True, text=True,
+            creationflags=FLAGS_SIN_CONSOLA,
+        )
+    except OSError as error:
+        print(f"No se pudo ejecutar svcl.exe: {error}")
+        return False
+
     if resultado.returncode != 0:
         print(f"Error al enrutar {nombre_proceso}: {resultado.stderr}")
         return False
