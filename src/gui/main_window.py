@@ -13,6 +13,12 @@ from audio.routing import (
 from audio.volume import obtener_volumen, cambiar_volumen
 from audio.app_info import obtener_nombres_amigables, nombre_para_mostrar
 from storage.rules import guardar_regla, obtener_regla
+from storage.preferences import (
+    ACCION_CIERRE_BANDEJA,
+    ACCION_CIERRE_SALIR,
+    guardar_accion_cierre,
+    obtener_accion_cierre,
+)
 from gui.bandeja import ocultar_a_bandeja
 
 INTERVALO_MONITOREO_MS = 3000  # cada cuánto revisar si hay apps nuevas
@@ -41,9 +47,8 @@ class VentanaPrincipal(ctk.CTk):
         except Exception:
             pass
 
-        # Al apretar la X, en vez de cerrar la app, se minimiza a la
-        # bandeja del sistema (queda corriendo en segundo plano).
-        self.protocol("WM_DELETE_WINDOW", lambda: ocultar_a_bandeja(self))
+        self.accion_cierre = obtener_accion_cierre()
+        self.protocol("WM_DELETE_WINDOW", self._al_cerrar)
 
         self.dispositivos = []
         self.opciones = {}   # nombre_amigable (o "Predeterminado...") -> nombre_completo real o sentinel
@@ -68,6 +73,11 @@ class VentanaPrincipal(ctk.CTk):
             command=self.actualizar
         ).pack(side="right")
 
+        ctk.CTkButton(
+            barra_superior, text="Configuración", width=110,
+            command=self._abrir_configuracion
+        ).pack(side="right", padx=(0, 8))
+
         encabezado = ctk.CTkFrame(self, fg_color="transparent")
         encabezado.pack(fill="x", padx=24)
         fuente_encabezado = ctk.CTkFont(size=12, weight="bold")
@@ -91,6 +101,57 @@ class VentanaPrincipal(ctk.CTk):
         """Muestra el resultado de una operación dentro de la ventana."""
         color = ("#B00020", "#FF6B6B") if es_error else ("#187A2F", "#69D28B")
         self.label_estado.configure(text=mensaje, text_color=color)
+
+    def _al_cerrar(self):
+        """Aplica el comportamiento de cierre elegido por el usuario."""
+        if self.accion_cierre == ACCION_CIERRE_BANDEJA:
+            ocultar_a_bandeja(self)
+        else:
+            self.destroy()
+
+    def _abrir_configuracion(self):
+        """Abre una ventana para elegir el comportamiento del botón X."""
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Configuración")
+        ventana.geometry("430x230")
+        ventana.resizable(False, False)
+        ventana.transient(self)
+        ventana.grab_set()
+
+        ctk.CTkLabel(
+            ventana,
+            text="Al cerrar la ventana principal",
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(anchor="w", padx=24, pady=(24, 14))
+
+        accion_elegida = ctk.StringVar(value=self.accion_cierre)
+
+        ctk.CTkRadioButton(
+            ventana,
+            text="Minimizar a la bandeja del sistema",
+            variable=accion_elegida,
+            value=ACCION_CIERRE_BANDEJA,
+        ).pack(anchor="w", padx=28, pady=6)
+
+        ctk.CTkRadioButton(
+            ventana,
+            text="Salir completamente de la aplicación",
+            variable=accion_elegida,
+            value=ACCION_CIERRE_SALIR,
+        ).pack(anchor="w", padx=28, pady=6)
+
+        def guardar():
+            self.accion_cierre = accion_elegida.get()
+            guardar_accion_cierre(self.accion_cierre)
+            self._mostrar_estado("Configuración de cierre guardada")
+            ventana.destroy()
+
+        ctk.CTkButton(
+            ventana,
+            text="Guardar",
+            width=110,
+            command=guardar,
+        ).pack(pady=(18, 0))
 
     def actualizar(self):
         for widget in self.contenedor.winfo_children():

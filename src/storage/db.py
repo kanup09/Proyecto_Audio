@@ -23,4 +23,10 @@ def obtener_conexion():
             dispositivo_nombre_amigable TEXT NOT NULL
         )
     """)
+    conexion.execute("""
+        CREATE TABLE IF NOT EXISTS configuracion (
+            clave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        )
+    """)
     return conexion
