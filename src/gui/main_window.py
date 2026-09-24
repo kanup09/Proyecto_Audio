@@ -76,7 +76,20 @@ class VentanaPrincipal(ctk.CTk):
         ctk.CTkLabel(encabezado, text="VOLUMEN", font=fuente_encabezado, anchor="w").pack(side="left", padx=(10, 0))
 
         self.contenedor = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.contenedor.pack(fill="both", expand=True, padx=16, pady=(6, 16))
+        self.contenedor.pack(fill="both", expand=True, padx=16, pady=(6, 6))
+
+        self.label_estado = ctk.CTkLabel(
+            self,
+            text="Listo",
+            anchor="w",
+            text_color=("gray40", "gray70"),
+        )
+        self.label_estado.pack(fill="x", padx=24, pady=(0, 12))
+
+    def _mostrar_estado(self, mensaje, es_error=False):
+        """Muestra el resultado de una operación dentro de la ventana."""
+        color = ("#B00020", "#FF6B6B") if es_error else ("#187A2F", "#69D28B")
+        self.label_estado.configure(text=mensaje, text_color=color)
 
     def actualizar(self):
         for widget in self.contenedor.winfo_children():
@@ -156,18 +169,31 @@ class VentanaPrincipal(ctk.CTk):
         if elegido == DISPOSITIVO_PREDETERMINADO:
             destino_real = obtener_dispositivo_predeterminado_actual()
             if not destino_real:
-                print("No se pudo detectar el dispositivo predeterminado actual")
+                mensaje = "No se pudo detectar el dispositivo predeterminado actual"
+                self._mostrar_estado(mensaje, es_error=True)
+                print(mensaje)
                 return
             if enrutar_app(nombre_proceso, destino_real):
                 guardar_regla(nombre_proceso, DISPOSITIVO_PREDETERMINADO, NOMBRE_PREDETERMINADO)
-                print(f"{nombre_proceso} -> {NOMBRE_PREDETERMINADO} (guardado)")
+                mensaje = f"{nombre_proceso} ahora sigue el dispositivo predeterminado"
+                self._mostrar_estado(mensaje)
+                print(f"{mensaje} (guardado)")
+            else:
+                self._mostrar_estado(
+                    f"No se pudo enrutar {nombre_proceso}",
+                    es_error=True,
+                )
         else:
             dispositivo = next(d for d in self.dispositivos if d["nombre_amigable"] == seleccionado)
             if enrutar_app(nombre_proceso, dispositivo["nombre_completo"]):
                 guardar_regla(nombre_proceso, dispositivo["nombre_completo"], dispositivo["nombre_amigable"])
-                print(f"{nombre_proceso} -> {dispositivo['nombre_amigable']} (guardado)")
+                mensaje = f"{nombre_proceso} fue asignado a {dispositivo['nombre_amigable']}"
+                self._mostrar_estado(mensaje)
+                print(f"{mensaje} (guardado)")
             else:
-                print(f"Error enrutando {nombre_proceso}")
+                mensaje = f"No se pudo enrutar {nombre_proceso}"
+                self._mostrar_estado(mensaje, es_error=True)
+                print(mensaje)
 
     def _on_cambio_volumen(self, valor, sesion, label_volumen):
         nivel = float(valor) / 100
@@ -190,7 +216,9 @@ class VentanaPrincipal(ctk.CTk):
                     if destino == DISPOSITIVO_PREDETERMINADO:
                         destino = obtener_dispositivo_predeterminado_actual()
                     if destino and enrutar_app(proceso, destino):
-                        print(f"[auto] {proceso} -> {regla['nombre_amigable']}")
+                        mensaje = f"Regla automática aplicada: {proceso} → {regla['nombre_amigable']}"
+                        self._mostrar_estado(mensaje)
+                        print(f"[auto] {mensaje}")
             self.actualizar()
         elif procesos_actuales != self.procesos_conocidos:
             self.actualizar()
