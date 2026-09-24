@@ -1,7 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('tools/svcl.exe', 'tools'), ('assets/icon.ico', 'assets')]
+datas = [
+    ('tools/svcl.exe', 'tools'),
+    ('tools/svcl.chm', 'tools'),
+    ('tools/readme.txt', 'tools'),
+    ('assets/icon.ico', 'assets'),
+]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('customtkinter')

@@ -28,3 +28,7 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+
+# Notas internas de diseño y tareas pendientes.
+docs/ARQUITECTURA.md
+docs/BACKLOG.md
