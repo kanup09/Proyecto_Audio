@@ -12,6 +12,7 @@ from audio.sessions import listar_sesiones
 from audio.device_events import registrar_notificador_dispositivo
 from audio.routing import (
     listar_dispositivos_salida, enrutar_app, obtener_filas_svcl,
+    restaurar_salida_windows,
     obtener_dispositivo_predeterminado_actual,
     DISPOSITIVO_PREDETERMINADO, NOMBRE_PREDETERMINADO,
 )
@@ -146,13 +147,9 @@ class VentanaPrincipal(ctk.CTk):
             return
 
         try:
-            destino = obtener_dispositivo_predeterminado_actual()
-            if not destino:
-                print("No se pudo detectar el dispositivo predeterminado al salir")
-            else:
-                for proceso in obtener_todas_las_reglas():
-                    if not enrutar_app(proceso, destino):
-                        print(f"No se pudo restaurar {proceso} al salir")
+            for proceso in obtener_todas_las_reglas():
+                if not restaurar_salida_windows(proceso):
+                    print(f"No se pudo restaurar {proceso} al salir")
         except Exception as error:
             # Un fallo al restaurar no debe impedir que el usuario cierre.
             print(f"No se pudo restaurar el audio al salir: {error}")

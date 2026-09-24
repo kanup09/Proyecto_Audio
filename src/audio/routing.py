@@ -81,6 +81,16 @@ def obtener_dispositivo_predeterminado_actual(filas=None):
     return None
 
 
+def restaurar_salida_windows(nombre_proceso):
+    """Quita la salida fija para seguir futuros cambios del sistema.
+
+    /SetAppDefault interpreta DefaultRenderDevice como restablecimiento de la
+    preferencia de salida, no como el identificador del dispositivo actual.
+    Las reglas propias guardadas en SQLite no se modifican.
+    """
+    return enrutar_app(nombre_proceso, "DefaultRenderDevice")
+
+
 def enrutar_app(nombre_proceso, nombre_dispositivo):
     """Manda el audio de un proceso a un dispositivo de salida específico."""
     try:
