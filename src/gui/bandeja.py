@@ -12,7 +12,7 @@ def _crear_imagen_icono():
     return imagen
 
 
-def _iniciar_icono(ventana):
+def _iniciar_icono(ventana, al_salir):
     """pystray corre su propio loop bloqueante (icono.run()), por eso
     esta función se llama siempre desde un hilo aparte, nunca desde el
     hilo principal de Tkinter (si no, se congelaría la ventana entera)."""
@@ -25,7 +25,7 @@ def _iniciar_icono(ventana):
 
     def salir(icono, item):
         icono.stop()
-        ventana.after(0, ventana.destroy)
+        ventana.after(0, al_salir)
 
     menu = pystray.Menu(
         pystray.MenuItem("Abrir", mostrar, default=True),
@@ -35,8 +35,14 @@ def _iniciar_icono(ventana):
     icono.run()
 
 
-def ocultar_a_bandeja(ventana):
+def ocultar_a_bandeja(ventana, al_salir=None):
     """Oculta la ventana y deja el ícono corriendo en la bandeja."""
+    if al_salir is None:
+        al_salir = ventana.destroy
     ventana.withdraw()
-    hilo = threading.Thread(target=_iniciar_icono, args=(ventana,), daemon=True)
+    hilo = threading.Thread(
+        target=_iniciar_icono,
+        args=(ventana, al_salir),
+        daemon=True,
+    )
     hilo.start()

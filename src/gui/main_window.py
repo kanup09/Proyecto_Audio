@@ -66,6 +66,8 @@ class VentanaPrincipal(ctk.CTk):
         self.id_proximo_monitoreo = None
         self.enumerador_notificaciones = None
         self.notificador_dispositivo = None
+        self.aplicar_reglas_iniciales = True
+        self.salida_en_curso = False
 
         self._construir_interfaz()
         self.actualizar()
@@ -119,8 +121,42 @@ class VentanaPrincipal(ctk.CTk):
     def _al_cerrar(self):
         """Aplica el comportamiento de cierre elegido por el usuario."""
         if self.accion_cierre == ACCION_CIERRE_BANDEJA:
-            ocultar_a_bandeja(self)
+            ocultar_a_bandeja(self, self._salir_aplicacion)
         else:
+            self._salir_aplicacion()
+
+    def _salir_aplicacion(self):
+        """Detiene el monitoreo y prepara el audio antes de cerrar."""
+        if self.salida_en_curso:
+            return
+
+        self.salida_en_curso = True
+        if self.id_proximo_monitoreo is not None:
+            self.after_cancel(self.id_proximo_monitoreo)
+            self.id_proximo_monitoreo = None
+
+        self._mostrar_estado("Restaurando las aplicaciones antes de salir...")
+        self.update_idletasks()
+        self._esperar_monitoreo_para_salir()
+
+    def _esperar_monitoreo_para_salir(self):
+        """Evita que una regla se reaplique después del restablecimiento."""
+        if self.monitoreo_en_curso:
+            self.after(100, self._esperar_monitoreo_para_salir)
+            return
+
+        try:
+            destino = obtener_dispositivo_predeterminado_actual()
+            if not destino:
+                print("No se pudo detectar el dispositivo predeterminado al salir")
+            else:
+                for proceso in obtener_todas_las_reglas():
+                    if not enrutar_app(proceso, destino):
+                        print(f"No se pudo restaurar {proceso} al salir")
+        except Exception as error:
+            # Un fallo al restaurar no debe impedir que el usuario cierre.
+            print(f"No se pudo restaurar el audio al salir: {error}")
+        finally:
             self.destroy()
 
     def _abrir_configuracion(self):
@@ -309,6 +345,9 @@ class VentanaPrincipal(ctk.CTk):
 
     def _comprobar_evento_dispositivo(self):
         """Inicia una consulta inmediata cuando Windows informa un cambio."""
+        if self.salida_en_curso:
+            return
+
         if (
             self.evento_cambio_predeterminado.is_set()
             and not self.monitoreo_en_curso
@@ -320,6 +359,9 @@ class VentanaPrincipal(ctk.CTk):
 
     def _programar_monitoreo(self, demora_ms):
         """Programa una única comprobación y reemplaza la espera anterior."""
+        if self.salida_en_curso:
+            return
+
         if self.id_proximo_monitoreo is not None:
             self.after_cancel(self.id_proximo_monitoreo)
         self.id_proximo_monitoreo = self.after(
@@ -336,9 +378,14 @@ class VentanaPrincipal(ctk.CTk):
 
         procesos_anteriores = set(self.procesos_conocidos)
         predeterminado_anterior = self.dispositivo_predeterminado_conocido
+        aplicar_reglas_iniciales = self.aplicar_reglas_iniciales
         hilo = threading.Thread(
             target=self._consultar_sesiones_en_segundo_plano,
-            args=(procesos_anteriores, predeterminado_anterior),
+            args=(
+                procesos_anteriores,
+                predeterminado_anterior,
+                aplicar_reglas_iniciales,
+            ),
             daemon=True,
         )
         hilo.start()
@@ -348,6 +395,7 @@ class VentanaPrincipal(ctk.CTk):
         self,
         procesos_anteriores,
         predeterminado_anterior,
+        aplicar_reglas_iniciales,
     ):
         """Consulta Windows desde un hilo y entrega datos, nunca widgets."""
         resultado = {
@@ -383,7 +431,11 @@ class VentanaPrincipal(ctk.CTk):
             )
 
             reglas = obtener_todas_las_reglas()
-            procesos_a_enrutar = set(nuevos)
+            procesos_a_enrutar = (
+                set(procesos_actuales)
+                if aplicar_reglas_iniciales
+                else set(nuevos)
+            )
             if cambio_predeterminado:
                 procesos_a_enrutar.update(
                     proceso
@@ -441,6 +493,7 @@ class VentanaPrincipal(ctk.CTk):
             self._mostrar_estado(mensaje, es_error=True)
             print(mensaje)
         else:
+            self.aplicar_reglas_iniciales = False
             self.dispositivo_predeterminado_conocido = resultado[
                 "dispositivo_predeterminado"
             ]
@@ -456,7 +509,8 @@ class VentanaPrincipal(ctk.CTk):
                 self.actualizar()
 
         # Un fallo aislado no debe detener las comprobaciones futuras.
-        self._programar_monitoreo(INTERVALO_MONITOREO_MS)
+        if not self.salida_en_curso:
+            self._programar_monitoreo(INTERVALO_MONITOREO_MS)
 
 
 def iniciar():
