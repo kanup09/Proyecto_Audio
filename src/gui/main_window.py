@@ -12,17 +12,13 @@ from audio.routing import (
 )
 from audio.volume import obtener_volumen, cambiar_volumen
 from audio.app_info import obtener_nombres_amigables, nombre_para_mostrar
-from storage.rules import guardar_regla, obtener_regla, eliminar_regla
+from storage.rules import guardar_regla, obtener_regla
 from gui.bandeja import ocultar_a_bandeja
 
 INTERVALO_MONITOREO_MS = 3000  # cada cuánto revisar si hay apps nuevas
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
-
-SIN_ASIGNAR = "SIN_ASIGNAR"
-NOMBRE_SIN_ASIGNAR = "Sin asignar (dejar que Windows controle)"
-
 
 def get_path(relative_path):
     base_path = getattr(
@@ -92,7 +88,6 @@ class VentanaPrincipal(ctk.CTk):
         nombres_amigables = obtener_nombres_amigables(filas_svcl)
 
         self.opciones = {
-            NOMBRE_SIN_ASIGNAR: SIN_ASIGNAR,
             NOMBRE_PREDETERMINADO: DISPOSITIVO_PREDETERMINADO,
         }
         for d in self.dispositivos:
@@ -124,7 +119,9 @@ class VentanaPrincipal(ctk.CTk):
             elif regla and regla["nombre_amigable"] in self.opciones:
                 combo.set(regla["nombre_amigable"])
             else:
-                combo.set(NOMBRE_SIN_ASIGNAR)
+                # Sin una regla propia, Windows ya controla la salida de la
+                # aplicación mediante su dispositivo predeterminado.
+                combo.set(NOMBRE_PREDETERMINADO)
 
             combo.configure(
                 command=lambda valor, proceso=nombre_proceso, c=combo: self._on_seleccion(proceso, c)
@@ -155,11 +152,6 @@ class VentanaPrincipal(ctk.CTk):
             return
 
         elegido = self.opciones[seleccionado]
-
-        if elegido == SIN_ASIGNAR:
-            eliminar_regla(nombre_proceso)
-            print(f"{nombre_proceso}: regla eliminada, ahora la controla Windows")
-            return
 
         if elegido == DISPOSITIVO_PREDETERMINADO:
             destino_real = obtener_dispositivo_predeterminado_actual()
