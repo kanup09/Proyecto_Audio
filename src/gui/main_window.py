@@ -60,6 +60,7 @@ class VentanaPrincipal(ctk.CTk):
         self.opciones = {}   # nombre_amigable (o "Predeterminado...") -> nombre_completo real o sentinel
         self.filas = {}
         self.procesos_conocidos = set()
+        self.sesiones_visibles = set()
         self.dispositivo_predeterminado_conocido = None
         self.resultados_monitoreo = queue.Queue()
         self.evento_cambio_predeterminado = threading.Event()
@@ -100,7 +101,7 @@ class VentanaPrincipal(ctk.CTk):
         fuente_encabezado = ctk.CTkFont(size=12, weight="bold")
 
         ctk.CTkLabel(encabezado, text="APLICACIÓN", font=fuente_encabezado, width=160, anchor="w").pack(side="left")
-        ctk.CTkLabel(encabezado, text="DISPOSITIVO", font=fuente_encabezado, width=220, anchor="w").pack(side="left")
+        ctk.CTkLabel(encabezado, text="SALIDA PARA TODA LA APP", font=fuente_encabezado, width=220, anchor="w").pack(side="left")
         ctk.CTkLabel(encabezado, text="VOLUMEN", font=fuente_encabezado, anchor="w").pack(side="left", padx=(10, 0))
 
         self.contenedor = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -240,41 +241,41 @@ class VentanaPrincipal(ctk.CTk):
             for f in filas_svcl
             if f.get("Type") == "Device" and f.get("Direction") == "Render"
         }
-        salidas_por_proceso = {}
-        for sesion in sesiones:
-            try:
-                if sesion.Process:
-                    proceso = sesion.Process.name()
-                    salida = salidas_por_id.get(
-                        getattr(sesion, "dispositivo_salida_id", None),
-                        "Dispositivo desconocido",
-                    )
-                    salidas_por_proceso.setdefault(proceso, set()).add(salida)
-            except (OSError, PsutilError):
-                continue
-
         procesos_vistos = set()
+        sesiones_visibles = set()
+        numero_por_proceso = {}
         for sesion in sesiones:
-            if not sesion.Process:
-                continue
             try:
+                if not sesion.Process:
+                    continue
                 nombre_proceso = sesion.Process.name()
+                estado = sesion.State
+                pid = sesion.ProcessId
+                identidad = (sesion.dispositivo_salida_id, sesion.InstanceIdentifier)
             except (OSError, PsutilError):
                 # El proceso puede cerrarse entre la detección y esta consulta.
                 continue
-            if nombre_proceso in procesos_vistos:
-                continue
             procesos_vistos.add(nombre_proceso)
+            if estado != 1:  # Ocultar inactivas y expiradas, sin borrar reglas.
+                continue
+            sesiones_visibles.add(identidad)
+            numero = numero_por_proceso.get(nombre_proceso, 0) + 1
+            numero_por_proceso[nombre_proceso] = numero
 
             texto_mostrado = nombre_para_mostrar(nombre_proceso, nombres_amigables)
 
             fila = ctk.CTkFrame(self.contenedor, corner_radius=10)
             fila.pack(fill="x", pady=5, padx=2)
 
-            salidas = sorted(salidas_por_proceso.get(nombre_proceso, set()))
+            salida = salidas_por_id.get(
+                getattr(sesion, "dispositivo_salida_id", None),
+                "Dispositivo desconocido",
+            )
+            estado_texto = "Activa" if estado == 1 else "Inactiva"
             ctk.CTkLabel(
                 fila,
-                text="Salidas de las sesiones: " + ("; ".join(salidas) or "Desconocida"),
+                text=(f"Sesión {numero} · PID {pid} · {estado_texto}\n"
+                      f"Salida observada: {salida}"),
                 anchor="w", wraplength=520,
                 text_color=("gray40", "gray70"),
             ).pack(side="bottom", fill="x", padx=12, pady=(0, 8))
@@ -315,9 +316,16 @@ class VentanaPrincipal(ctk.CTk):
             slider.pack(side="left", padx=(10, 6), pady=10)
             label_volumen.pack(side="left", padx=(0, 12), pady=10)
 
-            self.filas[nombre_proceso] = {"combo": combo, "sesion": sesion}
+            self.filas[(nombre_proceso, numero)] = {
+                "proceso": nombre_proceso, "combo": combo, "sesion": sesion,
+            }
 
         self.procesos_conocidos = procesos_vistos
+        self.sesiones_visibles = sesiones_visibles
+        if not sesiones_visibles:
+            ctk.CTkLabel(
+                self.contenedor, text="No hay sesiones de audio activas",
+            ).pack(pady=20)
 
     def _on_seleccion(self, nombre_proceso, combo):
         seleccionado = combo.get()
@@ -331,6 +339,7 @@ class VentanaPrincipal(ctk.CTk):
             # guardar como salida fija el dispositivo predeterminado actual.
             if restaurar_salida_windows(nombre_proceso):
                 guardar_regla(nombre_proceso, DISPOSITIVO_PREDETERMINADO, NOMBRE_PREDETERMINADO)
+                self._sincronizar_regla_visible(nombre_proceso, seleccionado)
                 mensaje = f"{nombre_proceso} ahora sigue el dispositivo predeterminado"
                 self._mostrar_estado(mensaje)
                 print(f"{mensaje} (guardado)")
@@ -343,6 +352,7 @@ class VentanaPrincipal(ctk.CTk):
             dispositivo = next(d for d in self.dispositivos if d["nombre_amigable"] == seleccionado)
             if enrutar_app(nombre_proceso, dispositivo["nombre_completo"]):
                 guardar_regla(nombre_proceso, dispositivo["nombre_completo"], dispositivo["nombre_amigable"])
+                self._sincronizar_regla_visible(nombre_proceso, seleccionado)
                 mensaje = f"{nombre_proceso} fue asignado a {dispositivo['nombre_amigable']}"
                 self._mostrar_estado(mensaje)
                 print(f"{mensaje} (guardado)")
@@ -351,9 +361,22 @@ class VentanaPrincipal(ctk.CTk):
                 self._mostrar_estado(mensaje, es_error=True)
                 print(mensaje)
 
+    def _sincronizar_regla_visible(self, nombre_proceso, seleccionado):
+        """La regla es por ejecutable, aunque mostremos varias sesiones."""
+        for fila in self.filas.values():
+            if fila["proceso"] == nombre_proceso:
+                fila["combo"].set(seleccionado)
+
     def _on_cambio_volumen(self, valor, sesion, label_volumen):
         nivel = float(valor) / 100
-        cambiar_volumen(sesion, nivel)
+        try:
+            cambiar_volumen(sesion, nivel)
+        except OSError:
+            self._mostrar_estado(
+                "No se pudo cambiar el volumen. Pulsá Actualizar para revisar las sesiones.",
+                es_error=True,
+            )
+            return
         label_volumen.configure(text=f"{int(float(valor))}%")
 
     def _iniciar_notificaciones_dispositivo(self):
@@ -426,6 +449,7 @@ class VentanaPrincipal(ctk.CTk):
         """Consulta Windows desde un hilo y entrega datos, nunca widgets."""
         resultado = {
             "procesos": procesos_anteriores,
+            "sesiones_visibles": set(),
             "dispositivo_predeterminado": predeterminado_anterior,
             "mensajes": [],
             "error": None,
@@ -440,10 +464,14 @@ class VentanaPrincipal(ctk.CTk):
 
             procesos_actuales = set()
             for sesion in listar_sesiones():
-                if not sesion.Process:
-                    continue
                 try:
+                    if not sesion.Process:
+                        continue
                     procesos_actuales.add(sesion.Process.name())
+                    if sesion.State == 1:
+                        resultado["sesiones_visibles"].add((
+                            sesion.dispositivo_salida_id, sesion.InstanceIdentifier,
+                        ))
                 except (OSError, PsutilError):
                     continue
 
@@ -530,7 +558,10 @@ class VentanaPrincipal(ctk.CTk):
                 self._mostrar_estado(mensaje, es_error=es_error)
 
             procesos_actuales = resultado["procesos"]
-            if procesos_actuales != self.procesos_conocidos:
+            if (
+                procesos_actuales != self.procesos_conocidos
+                or resultado["sesiones_visibles"] != self.sesiones_visibles
+            ):
                 # Se actualiza antes de redibujar para no volver a aplicar una
                 # regla si la actualización visual falla de manera aislada.
                 self.procesos_conocidos = procesos_actuales
