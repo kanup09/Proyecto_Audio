@@ -294,13 +294,9 @@ class VentanaPrincipal(ctk.CTk):
         elegido = self.opciones[seleccionado]
 
         if elegido == DISPOSITIVO_PREDETERMINADO:
-            destino_real = obtener_dispositivo_predeterminado_actual()
-            if not destino_real:
-                mensaje = "No se pudo detectar el dispositivo predeterminado actual"
-                self._mostrar_estado(mensaje, es_error=True)
-                print(mensaje)
-                return
-            if enrutar_app(nombre_proceso, destino_real):
+            # Restablecer la preferencia nativa permite seguir a Windows sin
+            # guardar como salida fija el dispositivo predeterminado actual.
+            if restaurar_salida_windows(nombre_proceso):
                 guardar_regla(nombre_proceso, DISPOSITIVO_PREDETERMINADO, NOMBRE_PREDETERMINADO)
                 mensaje = f"{nombre_proceso} ahora sigue el dispositivo predeterminado"
                 self._mostrar_estado(mensaje)
@@ -449,9 +445,11 @@ class VentanaPrincipal(ctk.CTk):
 
                 destino = regla["nombre_completo"]
                 if destino == DISPOSITIVO_PREDETERMINADO:
-                    destino = predeterminado_actual
+                    aplicado = restaurar_salida_windows(proceso)
+                else:
+                    aplicado = bool(destino) and enrutar_app(proceso, destino)
 
-                if destino and enrutar_app(proceso, destino):
+                if aplicado:
                     if cambio_predeterminado and proceso not in nuevos:
                         mensaje = (
                             f"{proceso} ahora sigue el nuevo dispositivo "
