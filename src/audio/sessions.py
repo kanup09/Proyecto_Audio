@@ -19,7 +19,10 @@ def listar_sesiones():
             for j in range(enum_sesiones.GetCount()):
                 ctl = enum_sesiones.GetSession(j)
                 ctl2 = ctl.QueryInterface(IAudioSessionControl2)
-                sesiones.append(AudioSession(ctl2))
+                sesion = AudioSession(ctl2)
+                # Conservamos el endpoint observado, no una preferencia inferida.
+                sesion.dispositivo_salida_id = dispositivo.GetId()
+                sesiones.append(sesion)
         except OSError:
             # Algunos dispositivos (virtuales, deshabilitados) no dejan
             # activar su administrador de sesiones. Los salteamos.

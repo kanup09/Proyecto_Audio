@@ -229,6 +229,29 @@ class VentanaPrincipal(ctk.CTk):
         for d in self.dispositivos:
             self.opciones[d["nombre_amigable"]] = d["nombre_completo"]
         nombres_para_combo = list(self.opciones.keys())
+        nombres_por_id = {
+            d["nombre_completo"]: d["nombre_amigable"]
+            for d in self.dispositivos
+        }
+        salidas_por_id = {
+            f.get("Item ID", ""): (
+                f"{f.get('Name', '')} ({f.get('Device Name', '')})"
+            )
+            for f in filas_svcl
+            if f.get("Type") == "Device" and f.get("Direction") == "Render"
+        }
+        salidas_por_proceso = {}
+        for sesion in sesiones:
+            try:
+                if sesion.Process:
+                    proceso = sesion.Process.name()
+                    salida = salidas_por_id.get(
+                        getattr(sesion, "dispositivo_salida_id", None),
+                        "Dispositivo desconocido",
+                    )
+                    salidas_por_proceso.setdefault(proceso, set()).add(salida)
+            except (OSError, PsutilError):
+                continue
 
         procesos_vistos = set()
         for sesion in sesiones:
@@ -248,6 +271,14 @@ class VentanaPrincipal(ctk.CTk):
             fila = ctk.CTkFrame(self.contenedor, corner_radius=10)
             fila.pack(fill="x", pady=5, padx=2)
 
+            salidas = sorted(salidas_por_proceso.get(nombre_proceso, set()))
+            ctk.CTkLabel(
+                fila,
+                text="Salidas de las sesiones: " + ("; ".join(salidas) or "Desconocida"),
+                anchor="w", wraplength=520,
+                text_color=("gray40", "gray70"),
+            ).pack(side="bottom", fill="x", padx=12, pady=(0, 8))
+
             ctk.CTkLabel(fila, text=texto_mostrado, width=150, anchor="w").pack(side="left", padx=(12, 6), pady=10)
 
             combo = ctk.CTkComboBox(fila, values=nombres_para_combo, width=220, state="readonly")
@@ -256,12 +287,14 @@ class VentanaPrincipal(ctk.CTk):
             regla = obtener_regla(nombre_proceso)
             if regla and regla["nombre_completo"] == DISPOSITIVO_PREDETERMINADO:
                 combo.set(NOMBRE_PREDETERMINADO)
-            elif regla and regla["nombre_amigable"] in self.opciones:
-                combo.set(regla["nombre_amigable"])
+            elif regla and regla["nombre_completo"] in nombres_por_id:
+                combo.set(nombres_por_id[regla["nombre_completo"]])
+            elif regla:
+                combo.set(f"No disponible: {regla['nombre_amigable']}")
             else:
-                # Sin una regla propia, Windows ya controla la salida de la
-                # aplicación mediante su dispositivo predeterminado.
-                combo.set(NOMBRE_PREDETERMINADO)
+                # No tener regla propia no implica que Windows no tenga una
+                # asignación persistente. No inventamos esa preferencia.
+                combo.set("Sin regla en Proyecto Audio")
 
             combo.configure(
                 command=lambda valor, proceso=nombre_proceso, c=combo: self._on_seleccion(proceso, c)
